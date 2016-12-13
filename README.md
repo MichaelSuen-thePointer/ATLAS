@@ -11,11 +11,11 @@ the number *k* represents *the variable that enclosed by the kth lambda*
 
 for example:
 
-\a.a can be represented as \.0
+\\a.a can be represented as \\.0
 
-\f.\s.s can be represented as \.\.0 
+\\f.\\s.s can be represented as \\.\\.0 
 
-and \f.\s.fs is same as \.\.10 
+and \\f.\\s.fs is same as \\.\\.10 
 
 when it comes to free variable, first, give it a unique number that is greater than the number of *lambda*s, then when using it in the lambda expression, add it by the number of *lamnda*s which surround it.
 
@@ -27,7 +27,7 @@ y -> 3
 
 then
 
-\w.y w is represented as \.4 0, in which 4 comes from the origin number of free variable **3** + the number of *lambda* that surround the variable **1**
+\\w.y w is represented as \\.4 0, in which 4 comes from the origin number of free variable **3** + the number of *lambda* that surround the variable **1**
 
 ##Usage in code (C#)
 
