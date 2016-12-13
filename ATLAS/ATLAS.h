@@ -1,4 +1,5 @@
 #pragma once
+#include <iostream>
 #include <memory>
 #include <string>
 #include <variant>
@@ -75,7 +76,7 @@ std::ostream& operator<<(std::ostream& os, const variable& t)
     return os << t.index;
 }
 
-template<class... T>
+template<class... T, class = std::enable_if_t<sizeof...(T)>>
 std::ostream& operator<<(std::ostream& os, const std::variant<T...>& v);
 
 template<class Tterm1, class Tterm2>
@@ -93,115 +94,109 @@ std::ostream& operator<<(std::ostream& os, const application<Tterm1, Tterm2>& t)
     return os << "(" << t.left << " " << t.right << ")";
 }
 
-template<class... T, class = std::enable_if_t<(sizeof...(T) > 0)>>
+template<class... T, class >
 std::ostream& operator<<(std::ostream& os, const std::variant<T...>& v)
 {
     std::visit([&os](const auto& x) { os << x; }, v);
     return os;
 }
 
-template<class T, class = std::enable_if_t<std::is_same<T, variable>::value>>
-auto shift_walk(T& t, ptrdiff_t offset, ptrdiff_t curr)
+struct shift_walk_
 {
-    if (t.index >= curr)
+    static shift_walk_ shift_walk;
+    auto operator()(const variable& t, ptrdiff_t offset, ptrdiff_t curr) const
     {
-        return make_variable(t.index + offset, t.contex_length + offset);
+        if (t.index >= curr)
+        {
+            std::cout << t.index + offset << "\n";
+            return make_variable(t.index + offset);
+        }
+        std::cout << t.index << "\n";
+        return make_variable(t.index);
     }
-    return make_variable(t.index, t.contex_length + offset);
-}
-
-template<class Tterm>
-auto shift_walk(abstraction<Tterm>& t, ptrdiff_t offset, ptrdiff_t curr)
--> decltype(make_abstraction(t.param_name, shift_walk(t.body, offset, curr + 1)));
-
-template<class Tterm1, class Tterm2>
-auto shift_walk(application<Tterm1, Tterm2>& t, ptrdiff_t offset, ptrdiff_t curr)
-->decltype(make_application(shift_walk(curr, t.left), shift_walk(curr, t.right)));
-
-template<class... T>
-auto shift_walk(std::variant<T...>& t, ptrdiff_t offset, ptrdiff_t curr)
-->std::variant<T...>;
-
-template<class Tterm>
-auto shift_walk(abstraction<Tterm>& t, ptrdiff_t offset, ptrdiff_t curr)
--> decltype(make_abstraction(t.param_name, shift_walk(t.body, offset, curr + 1)))
-{
-    return make_abstraction(t.param_name, shift_walk(t.body, offset, curr + 1));
-}
-
-template<class Tterm1, class Tterm2>
-auto shift_walk(application<Tterm1, Tterm2>& t, ptrdiff_t offset, ptrdiff_t curr)
-->decltype(make_application(shift_walk(t.left, offset, curr), shift_walk(t.right, offset, curr)))
-{
-    return make_application(shift_walk(t.left, offset, curr), shift_walk(t.right, offset, curr));
-}
-
-template<class... T>
-auto shift_walk(std::variant<T...>& t, ptrdiff_t offset, ptrdiff_t curr)
-->std::variant<T...>
-{
-    return std::visit([=](auto& x) { return std::variant<T...>{shift_walk(x, offset, curr)}; }, t);
-}
+    template<class Tterm>
+    auto operator()(const abstraction<Tterm>& t, ptrdiff_t offset, ptrdiff_t curr) const
+    {
+        auto& r = make_abstraction(t.param_name, shift_walk(t.body, offset, curr + 1));
+        std::cout << r << "\n";
+        return r;
+    }
+    template<class Tterm1, class Tterm2>
+    auto operator()(const application<Tterm1, Tterm2>& t, ptrdiff_t offset, ptrdiff_t curr) const
+    {
+        auto& r = make_application(shift_walk(t.left, offset, curr), shift_walk(t.right, offset, curr));
+        std::cout << r << "\n";
+        return r;
+    }
+    template<class... T>
+    auto operator()(const std::variant<T...>& t, ptrdiff_t offset, ptrdiff_t curr)
+    {
+        auto& r = std::visit([=](auto& x) { return std::variant<T...>{shift_walk(x, offset, curr)}; }, t);
+        std::cout << r << "\n";
+        return r;
+    }
+};
+const shift_walk_& shift_walk = shift_walk_::shift_walk;
 
 template<class T>
-auto shift_term(T& t, ptrdiff_t offset)
+auto shift_term(const T& t, ptrdiff_t offset)
 {
     return shift_walk(t, offset, 0);
 }
 
-template<class Tterm>
-auto substitute_walk(variable& t, ptrdiff_t from, Tterm& to, ptrdiff_t curr)
-->std::conditional_t<std::is_same<variable, Tterm>::value,
-    variable,
-    std::variant<variable, decltype(shift_term(to, curr))>>
+struct substitute_walk_
 {
-    if (t.index == from + curr)
+    static substitute_walk_ substitute_walk;
+
+    template<class Tterm>
+    auto operator()(const variable& t, ptrdiff_t from, const Tterm& to) const
     {
-        return shift_term(to, curr);
+        using result_t = merge_variant_t<variable, Tterm>;
+        if (t.index == from)
+        {
+            std::cout << to << "\n";
+            return result_t{to};
+        }
+        std::cout << t << "\n";
+        return result_t{t};
     }
-    return t;
-}
+    template<class Tbody, class Tterm>
+    auto operator()(const abstraction<Tbody>& t, ptrdiff_t from, const Tterm& to) const
+    {
+        auto& r = make_abstraction(t.param_name, substitute_walk(t.body, from + 1, shift_term(to, 1)));
+        std::cout << r << "\n";
+        return r;
+    }
+    template<class Tterm1, class Tterm2, class Tterm>
+    auto operator()(const application<Tterm1, Tterm2>& t, ptrdiff_t from, const Tterm& to) const
+    {
+        auto& r = make_application(substitute_walk(t.left, from, to), substitute_walk(t.right, from, to));
+        std::cout << r << "\n";
+        return r;
+    }
 
-template<class Tbody, class Tterm>
-auto substitute_walk(abstraction<Tbody>& t, ptrdiff_t from, Tterm& to, ptrdiff_t curr)
-->decltype(make_abstraction(t.param_name, substitute_walk(t.body, from, to, curr + 1)));
-template<class Tterm1, class Tterm2, class Tterm>
-auto substitute_walk(application<Tterm1, Tterm2>& t, ptrdiff_t from, Tterm& to, ptrdiff_t curr)
-->decltype(make_application(substitute_walk(t.left, from, to, curr), substitute_walk(t.left, from, to, curr)));
-template<class Tterm, class... T>
-auto substitute_walk(std::variant<T...>& t, ptrdiff_t from, Tterm& to, ptrdiff_t curr)
-->merge_variant_t<decltype(substitute_walk(std::declval<T>(), from, to, curr))...>;
+    template<class Tterm, class... T>
+    auto operator()(const std::variant<T...>& t, ptrdiff_t from, const Tterm& to) const
+    {
+        using result_t = merge_variant_t<decltype(substitute_walk(std::declval<T>(), from, to))...>;
+        auto& r = std::visit([&](const auto& x)
+        {
+            return std::visit([](const auto& r) { return result_t{r}; }, make_variant_t<decltype(substitute_walk(x, from, to))>{substitute_walk(x, from, to)});
+        }, t);
+        std::cout << r << "\n";
+        return r;
+    }
+};
+const substitute_walk_& substitute_walk = substitute_walk_::substitute_walk;
 
-template<class Tbody, class Tterm>
-auto substitute_walk(abstraction<Tbody>& t, ptrdiff_t from, Tterm& to, ptrdiff_t curr)
-->decltype(make_abstraction(t.param_name, substitute_walk(t.body, from, to, curr + 1)))
+template<class T, class Tterm>
+auto substitute_term(const T& t, ptrdiff_t from, const Tterm& to)
 {
-    return make_abstraction(t.param_name, substitute_walk(t.body, from, to, curr + 1));
-}
-
-template<class Tterm1, class Tterm2, class Tterm>
-auto substitute_walk(application<Tterm1, Tterm2>& t, ptrdiff_t from, Tterm& to, ptrdiff_t curr)
-->decltype(make_application(substitute_walk(t.left, from, to, curr), substitute_walk(t.left, from, to, curr)))
-{
-    return make_application(substitute_walk(t.left, from, to, curr), substitute_walk(t.left, from, to, curr));
-}
-
-template<class Tterm, class... T>
-auto substitute_walk(std::variant<T...>& t, ptrdiff_t from, Tterm& to, ptrdiff_t curr)
-->merge_variant_t<decltype(substitute_walk(std::declval<T>(), from, to, curr))...>
-{
-    using result_t = merge_variant_t<decltype(substitute_walk(std::declval<T>(), from, to, curr))...>;
-    return std::visit([&](auto& x) { return result_t{substitute_walk(x, from, to, curr)}; }, t);
+    return substitute_walk(t, from, to);
 }
 
 template<class T, class Tterm>
-auto substitute_term(T& t, ptrdiff_t from, Tterm& to)
-{
-    return substitute_walk(t, from, to, 0);
-}
-
-template<class T, class Tterm>
-auto substitute_top_term(Tterm& t, T& to)
+auto substitute_top_term(const Tterm& t, const T& to)
 {
     return shift_term(substitute_term(t, 0, shift_term(to, 1)), -1);
 }
@@ -214,26 +209,175 @@ template<class T>
 struct is_val<abstraction<T>> : std::true_type
 {};
 
-template<>
-struct is_val<variable> : std::true_type
-{};
-
-template<class Tterm12, class Ttermv2, class = std::enable_if_t<is_val<Ttermv2>::value>>
-auto eval1(application<abstraction<Tterm12>, Ttermv2>& t)
+struct abstraction_checker
 {
-    return substitute_top_term(t.left.body, t.right);
+    template<class T>
+    bool operator()(const abstraction<T>&)
+    {
+        return true;
+    }
+    template<class T>
+    bool operator()(const T&)
+    {
+        return false;
+    }
+};
+
+template<class T>
+bool is_val_dynamic(const std::variant<T>& term)
+{
+    return std::visit(abstraction_checker{}, term);
 }
 
-template<class Tvalue1, class Tterm2, class = std::enable_if_t<is_val<Tvalue1>::value>>
-auto eval1(application<Tvalue1, Tterm2>& t)
+template<class T>
+bool is_val_dynamic(const T& term)
 {
-    return make_application(t.left, eval1(t.right));
+    return false;
+}
+
+template<class T>
+struct is_value_abstraction : std::false_type
+{};
+
+template<class T>
+struct is_value_abstraction<abstraction<T>> : std::conditional_t<is_val<T>::value, std::true_type, std::false_type>
+{};
+
+template<class... Tterm1, class... Tterm2>
+auto eval1(const application<std::variant<Tterm1...>, std::variant<Tterm2...>>& t)
+{
+    using result_t1 = merge_variant_t<decltype(substitute_top_term(std::declval<Tterm1>(), t.right))...>;
+    using result_t2 = merge_variant_t<result_t1, decltype(make_application(t.left, eval1(t.right)))>;
+    using result_t = merge_variant_t<result_t2, decltype(make_application(eval1(t.left), t.right))>;
+    if (is_val_dynamic(t.left))
+    {
+        if (is_val_dynamic(t.right))
+        {
+            std::cout << "var(abs), var(abs)\n";
+            return std::visit([&](const auto x)
+            {
+                return result_t{substitute_top_term(x.body, t.right)};
+            }, t.left);
+        }
+        else
+        {
+            std::cout << "var(abs), var\n";
+            return result_t{make_application(t.left, eval1(t.right))};
+        }
+    }
+    std::cout << "var, var\n";
+    return result_t{make_application(eval1(t.left), t.right)};
+}
+
+template<class Tterm1, class... Tterm2>
+auto eval1(const application<abstraction<Tterm1>, std::variant<Tterm2...>>& t)
+{
+    using result_t = merge_variant_t<
+        decltype(substitute_top_term(t.left.body, t.right)),
+        decltype(make_application(t.left, eval1(t.right)))>;
+    if (is_val_dynamic(t.right))
+    {
+        std::cout << "abs, var(abs)\n";
+        return result_t{substitute_top_term(t.left.body, t.right)};
+    }
+    std::cout << "abs, var\n";
+    return result_t{make_application(t.left, eval1(t.right))};
+}
+
+template<class... Tterm1, class Tterm2>
+auto eval1(const application<std::variant<Tterm1...>, abstraction<Tterm2>>& t)
+{
+    using result_t1 = merge_variant_t<decltype(substitute_top_term(std::declval<Tterm1>(), t.right))...>;
+    using result_t = merge_variant_t<result_t1, decltype(make_application(eval1(t.left), t.right))>;
+    if (is_val_dynamic(t.left))
+    {
+        std::cout << "var(abs), abs\n";
+        return result_t{std::visit([&](const auto x) { return substitute_top_term(x.body, t.right); }, t.left)};
+    }
+    std::cout << "var, abs\n";
+    return result_t{make_application(eval1(t.left), t.right)};
+}
+
+template<class... Tterm1, class Tterm2>
+auto eval1(const application<std::variant<Tterm1...>, Tterm2>& t)
+{
+    using result_t1 = merge_variant_t<decltype(substitute_top_term(std::declval<Tterm1>(), t.right))...>;
+    using result_t = merge_variant_t<result_t1, decltype(make_application(eval1(t.left), t.right))>;
+    if (is_val_dynamic(t.left))
+    {
+        std::cout << "var(abs), T\n";
+        return result_t{std::visit([&](const auto x) { return substitute_top_term(x.body, t.right); }, t.left)};
+    }
+    std::cout << "var, T\n";
+    return result_t{make_application(eval1(t.left), t.right)};
+}
+
+struct evaluator
+{
+    auto operator()(const variable& t)
+    {
+        return t;
+    }
+    template<class Tterm1, class Tterm2>
+    auto operator()(const application<Tterm1, Tterm2>& t)
+    {
+        return eval(t.left, t.right);
+    }
+    template<class Tterm>
+    auto operator()(const abstraction<Tterm>& t)
+    {
+        return (*this)(t.body);
+    }
+    template<class... Tterm>
+    auto operator()(const std::variant<Tterm...>& t)
+    {
+        return std::visit(*this, t);
+    }
+};
+
+template<class Tterm1, class Tterm2>
+auto eval1(const abstraction<Tterm1>& l, const abstraction<Tterm2>& r)
+{
+    return substitute_top_term(l.body, r);
 }
 
 template<class Tterm1, class Tterm2>
-auto eval1(application<Tterm1, Tterm2>& t, std::enable_if_t<!is_val<Tterm1>::value, int>* = nullptr)
+auto eval1(const abstraction<Tterm1>& l, const Tterm2& r)
 {
-    return make_application(eval1(t.left), t.right);
+    return make_application(l, eval1(r));
 }
+
+template<class Tterm1, class Tterm2>
+auto eval1(const Tterm1& l, const Tterm2& r)
+{
+    return make_application(eval1(l), r);
+}
+
+template<class Tterm>
+auto eval1(const abstraction<Tterm>& t)
+{
+    std::cout << "abs\n";
+    return make_abstraction(t.param_name, eval1(t.body));
+}
+
+
+template<class... T>
+auto eval1(const std::variant<T...>& term)
+{
+    std::cout << "eval " << term << " variant\n";
+    using result_t = merge_variant_t<decltype(eval1(std::declval<T>()))...>;
+    return std::visit([](const auto& x)
+    {
+        return std::visit([](const auto& r) { return result_t{r}; }, make_variant_t<decltype(eval1(x))>{eval1(x)});
+    }, term);
+}
+
+template<class T>
+auto eval1(const T& t)
+{
+    std::cout << "eval " << t << " plain\n";
+    return t;
+}
+
 
 }
